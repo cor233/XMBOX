@@ -214,11 +214,15 @@ public class History {
     }
 
     public String getSiteKey() {
-        return getKey().split(AppDatabase.SYMBOL)[0];
+        String key = getKey();
+        if (key == null) return "";
+        String[] parts = key.split(AppDatabase.SYMBOL);
+        return parts.length > 0 ? parts[0] : "";
     }
 
     public String getVodId() {
-        return getKey().split(AppDatabase.SYMBOL)[1];
+        String[] parts = getKey().split(AppDatabase.SYMBOL);
+        return parts.length > 1 ? parts[1] : "";
     }
 
     public Flag getFlag() {
@@ -279,7 +283,13 @@ public class History {
     public void update() {
         try {
             com.github.catvod.utils.Logger.d("History.update: 开始更新观看记录 key=" + getKey());
-            merge(find(), false);
+            // 从同 key 的旧记录继承 opening/ending/speed，但不再删除其它记录（避免误删已存的续播进度）
+            for (History item : find()) {
+                if (getKey().equals(item.getKey())) {
+                    checkParam(item);
+                    break;
+                }
+            }
             save();
             com.github.catvod.utils.Logger.d("History.update: 更新成功");
         } catch (Exception e) {

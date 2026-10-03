@@ -7,13 +7,12 @@ import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
-import android.widget.ImageButton;
-import android.widget.LinearLayout;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.Fragment;
 
+import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.api.config.LiveConfig;
 import com.fongmi.android.tv.api.config.VodConfig;
@@ -21,7 +20,6 @@ import com.fongmi.android.tv.api.config.WallConfig;
 import com.fongmi.android.tv.bean.Config;
 import com.fongmi.android.tv.databinding.DialogConfigBinding;
 import com.fongmi.android.tv.impl.ConfigCallback;
-import com.fongmi.android.tv.impl.Callback;
 import com.fongmi.android.tv.ui.custom.CustomTextListener;
 import com.fongmi.android.tv.utils.FileChooser;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
@@ -70,13 +68,13 @@ public class ConfigDialog {
 
     private void initDialog() {
         dialog = new MaterialAlertDialogBuilder(binding.getRoot().getContext()).setTitle(type == 0 ? R.string.setting_vod : type == 1 ? R.string.setting_live : R.string.setting_wall).setView(binding.getRoot()).setPositiveButton(edit ? R.string.dialog_edit : R.string.dialog_positive, this::onPositive).setNegativeButton(R.string.dialog_negative, this::onNegative).create();
-        dialog.getWindow().setDimAmount(0);
         dialog.show();
     }
 
     private void initView() {
-        binding.name.setText(getConfig().getName());
-        binding.url.setText(ori = getConfig().getUrl());
+        Config cfg = getConfig();
+        binding.name.setText(cfg != null ? cfg.getName() : "");
+        binding.url.setText(ori = cfg != null ? cfg.getUrl() : "");
         binding.input.setVisibility(edit ? View.VISIBLE : View.GONE);
         binding.url.setSelection(TextUtils.isEmpty(ori) ? 0 : ori.length());
     }
@@ -150,87 +148,17 @@ public class ConfigDialog {
         String url = binding.url.getText().toString().trim();
         String name = binding.name.getText().toString().trim();
         
-        android.util.Log.d("ConfigDialog", "onPositive: type=" + type + ", url=" + url + ", name=" + name);
-        
-        // 如果是编辑模式，更新现有配置
-        if (edit) Config.find(ori, type).url(url).name(name).update();
-        
-        // 如果URL为空，删除配置
         if (url.isEmpty()) {
-            android.util.Log.d("ConfigDialog", "URL is empty, deleting config");
-            Config.delete(ori, type);
+            App.execute(() -> Config.delete(ori, type));
             dialog.dismiss();
             return;
         }
         
-        // 只有URL不为空时，才设置配置
-        // 保存原始URL，以便在添加失败时恢复
-        String originalUrl = ori;
-        android.util.Log.d("ConfigDialog", "Calling Config.find with url=" + url + ", type=" + type);
-        
-        Config config = Config.find(url, type);
-        android.util.Log.d("ConfigDialog", "Config.find returned: " + (config != null ? config.toString() : "null"));
-        
-        android.util.Log.d("ConfigDialog", "Checking callback: " + (callback != null ? callback.getClass().getName() : "null"));
-        android.util.Log.d("ConfigDialog", "Checking fragment: " + (fragment != null ? fragment.getClass().getName() : "null"));
-        
-        android.util.Log.d("ConfigDialog", "Calling callback.setConfig");
-        callback.setConfig(config);
-        
-        android.util.Log.d("ConfigDialog", "setConfig completed");
-        
-        // 添加一个延迟检查，如果配置没有成功加载，则恢复原始URL
-        new android.os.Handler().postDelayed(() -> {
-            // 检查配置是否成功加载
-            Config currentConfig = getConfig();
-            if (currentConfig == null || !currentConfig.getUrl().equals(url)) {
-                // 配置加载失败，恢复原始URL
-                if (!TextUtils.isEmpty(originalUrl)) {
-                    // 如果有原始URL，恢复原始URL
-                    callback.setConfig(Config.find(originalUrl, type));
-                } else {
-                    // 如果没有原始URL，设置为空
-                    switch (type) {
-                        case 0:
-                            VodConfig.get().clear().config(Config.vod()).load(new Callback() {
-                                @Override
-                                public void success() {}
-                                
-                                @Override
-                                public void success(String result) {}
-                                
-                                @Override
-                                public void error(String msg) {}
-                            });
-                            break;
-                        case 1:
-                            LiveConfig.get().clear().config(Config.live()).load(new Callback() {
-                                @Override
-                                public void success() {}
-                                
-                                @Override
-                                public void success(String result) {}
-                                
-                                @Override
-                                public void error(String msg) {}
-                            });
-                            break;
-                        case 2:
-                            WallConfig.get().clear().config(Config.wall()).load(new Callback() {
-                                @Override
-                                public void success() {}
-                                
-                                @Override
-                                public void success(String result) {}
-                                
-                                @Override
-                                public void error(String msg) {}
-                            });
-                            break;
-                    }
-                }
-            }
-        }, 2000); // 2秒后检查
+        App.execute(() -> {
+            if (edit) Config.find(ori, type).url(url).name(name).update();
+            Config config = Config.find(url, type);
+            App.post(() -> callback.setConfig(config));
+        });
         
         dialog.dismiss();
     }

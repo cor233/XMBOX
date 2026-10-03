@@ -11,9 +11,15 @@ android {
     signingConfigs {
         release {
             storeFile file("../keystore/release.jks")
-            storePassword "xmbox123"
-            keyAlias "xmbox"
-            keyPassword "xmbox123"
+            // 从 gradle.properties.local 读取（该文件已加入 .gitignore，不会提交到仓库）
+            def localProps = new Properties()
+            def localFile = rootProject.file('gradle.properties.local')
+            if (localFile.exists()) {
+                localProps.load(localFile.newReader())
+            }
+            storePassword localProps.getProperty("STORE_PASSWORD", System.getenv("STORE_PASSWORD") ?: "")
+            keyAlias localProps.getProperty("KEY_ALIAS", "xmbox")
+            keyPassword localProps.getProperty("KEY_PASSWORD", System.getenv("KEY_PASSWORD") ?: "")
             // 同时启用v1、v2、v3、v4签名以确保最佳兼容性
             enableV1Signing true
             enableV2Signing true
@@ -25,13 +31,9 @@ android {
     defaultConfig {
         applicationId "com.fongmi.android.tv"
         minSdk 24
-        //noinspection ExpiredTargetSdkVersion
-        targetSdk 28
-        versionCode 316
-        versionName "3.1.6"
-        // GitHub Token (可选，用于提高API请求限制)
-        def githubToken = project.findProperty("GITHUB_TOKEN") ?: ""
-        buildConfigField "String", "GITHUB_TOKEN", "\"${githubToken}\""
+        targetSdk 34
+        versionCode 318
+        versionName "3.1.8"
         javaCompileOptions {
             annotationProcessorOptions {
                 arguments = ["room.schemaLocation": "$projectDir/schemas".toString(), "eventBusIndex": "com.fongmi.android.tv.event.EventIndex"]
@@ -104,7 +106,7 @@ android {
     }
 
     lint {
-        disable 'UnsafeOptInUsageError'
+        disable 'UnsafeOptInUsageError', 'ContentDescription'
     }
 
     compileOptions {
@@ -117,6 +119,9 @@ android {
 dependencies {
     implementation fileTree(dir: "libs", include: ["*.aar"])
     implementation project(':catvod')
+    // 运行时蜘蛛 jar（如 CatVodSpider-GM 的 GM.jar）依赖 kotlin-stdlib，
+    // 父 ClassLoader 必须能提供 kotlin.jvm.functions.* 等类，否则加载 f1/a 时抛 NoClassDefFoundError
+    implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.1.21'
     // implementation project(':chaquo') // 移除Python支持减少8-10MB体积
     implementation project(':quickjs')
     implementation 'androidx.appcompat:appcompat:1.7.0'
@@ -144,6 +149,9 @@ dependencies {
     implementation 'com.github.bumptech.glide:annotations:4.16.0'
     implementation('com.github.bumptech.glide:avif-integration:4.16.0') { exclude group: 'org.aomedia.avif.android', module: 'avif' }
     implementation 'com.github.bumptech.glide:okhttp3-integration:4.16.0'
+    implementation 'com.github.ctiao:dfm:0.9.25'
+    implementation 'com.github.devin1014.DLNA-Cast:dmc:v2.0.0'
+    implementation 'com.github.devin1014.DLNA-Cast:dmr:v2.0.0'
     implementation 'com.github.jahirfiquitiva:TextDrawable:1.0.3'
     implementation 'com.github.thegrizzlylabs:sardine-android:0.9'
     implementation 'com.github.teamnewpipe:NewPipeExtractor:v0.24.8'
@@ -154,9 +162,9 @@ dependencies {
     implementation 'io.antmedia:rtmp-client:3.1.0'
     implementation 'javax.servlet:javax.servlet-api:3.1.0'
     implementation 'org.aomedia.avif.android:avif:1.1.1.14d8e3c4'
-    implementation 'org.eclipse.jetty:jetty-client:8.1.21.v20160908'
-    implementation('org.eclipse.jetty:jetty-server:8.1.21.v20160908') { exclude group: 'org.eclipse.jetty.orbit', module: 'javax.servlet' }
-    implementation('org.eclipse.jetty:jetty-servlet:8.1.21.v20160908') { exclude group: 'org.eclipse.jetty.orbit', module: 'javax.servlet' }
+    implementation 'org.eclipse.jetty:jetty-client:8.1.22.v20160922'
+    implementation('org.eclipse.jetty:jetty-server:8.1.22.v20160922') { exclude group: 'org.eclipse.jetty.orbit', module: 'javax.servlet' }
+    implementation('org.eclipse.jetty:jetty-servlet:8.1.22.v20160922') { exclude group: 'org.eclipse.jetty.orbit', module: 'javax.servlet' }
     implementation 'org.fourthline.cling:cling-core:2.1.1'
     implementation 'org.fourthline.cling:cling-support:2.1.1'
     implementation 'org.greenrobot:eventbus:3.3.1'
@@ -173,9 +181,13 @@ dependencies {
     tabletImplementation 'com.google.android.flexbox:flexbox:3.0.0'
     tabletImplementation('com.journeyapps:zxing-android-embedded:4.3.0') { transitive = false }
     annotationProcessor 'androidx.room:room-compiler:2.6.1'
-    // annotationProcessor 'com.github.bumptech.glide:compiler:4.16.0'
     annotationProcessor 'org.greenrobot:eventbus-annotation-processor:3.3.1'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
-    implementation 'io.noties.markwon:core:4.6.2'
     implementation 'com.airbnb.android:lottie:5.2.0'
+    // MPV 播放器 — 如需启用，请从 https://github.com/mpv-android/mpv-android 获取 AAR
+    // 放入 app/libs/ 目录后取消下面注释：
+    // implementation fileTree(dir: "libs", include: ["*.aar"])
+    // 注意：MpvPlayer 类已内置优雅降级，库不存在时自动使用 ExoPlayer
+    // 加密存储 (用于 WebDAV 密码等敏感信息)
+    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 }

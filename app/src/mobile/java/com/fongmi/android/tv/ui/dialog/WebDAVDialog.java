@@ -54,20 +54,23 @@ public class WebDAVDialog {
     }
 
     public void show() {
-        initDialog();
         initView();
+        initDialog();
         initEvent();
     }
 
     private void initDialog() {
-        dialog = new MaterialAlertDialogBuilder(binding.getRoot().getContext())
+        dialog = new MaterialAlertDialogBuilder(fragment.getActivity())
             .setTitle("WebDAV 配置")
             .setView(binding.getRoot())
             .setPositiveButton("保存", this::onPositive)
             .setNegativeButton("取消", this::onNegative)
             .create();
-        dialog.getWindow().setDimAmount(0);
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN | android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
+        }
         dialog.show();
+        binding.getRoot().clearFocus();
     }
 
     private void initView() {
@@ -252,7 +255,7 @@ public class WebDAVDialog {
 
         // 在后台线程测试连接
         App.execute(() -> {
-            boolean success = syncManager.testConnection();
+            boolean success = syncManager.getConfig().testConnection().success;
             App.post(() -> {
                 // 检查对话框是否还存在
                 if (binding == null || dialog == null || !dialog.isShowing()) {

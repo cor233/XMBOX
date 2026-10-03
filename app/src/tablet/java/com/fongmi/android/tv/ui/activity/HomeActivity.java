@@ -32,6 +32,7 @@ import com.fongmi.android.tv.player.Source;
 import com.fongmi.android.tv.receiver.ShortcutReceiver;
 import com.fongmi.android.tv.server.Server;
 import com.fongmi.android.tv.ui.base.BaseActivity;
+import com.fongmi.android.tv.ui.base.BaseFragment;
 import com.fongmi.android.tv.ui.custom.FragmentStateManager;
 import com.fongmi.android.tv.ui.fragment.SettingFragment;
 import com.fongmi.android.tv.ui.fragment.VodFragment;
@@ -80,7 +81,6 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
         initFragment(savedInstanceState);
         Server.get().start();
         initConfig();
-        setNavigation();
     }
 
     @Override
@@ -93,10 +93,12 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
                 liveView.setOnLongClickListener(this::addShortcut);
             }
         }
+        bindFab();
     }
     
     private NavigationBarView getNavigationView() {
-        return findViewById(R.id.navigation);
+        // 平板首页已改用 FAB 悬浮导航，不再使用底部/侧边 NavigationBarView
+        return null;
     }
 
     private void checkAction(Intent intent) {
@@ -124,9 +126,19 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
     }
 
     private void initConfig() {
-        WallConfig.get().init();
-        LiveConfig.get().init().load();
-        VodConfig.get().init().load(getCallback());
+        // 把配置的 Room 读取移到后台线程，避免主线程访问数据库
+        App.execute(() -> {
+            Config wall = Config.wall();
+            Config live = Config.live();
+            Config vod = Config.vod();
+            App.post(() -> {
+                WallConfig.get().init(wall);
+                LiveConfig.get().init(live).load();
+                VodConfig.get().init(vod).load(getCallback());
+                // 配置加载完成后再刷新导航（LiveConfig.hasUrl 此时已用内存中的 config，不触发主线程读库）
+                setNavigation();
+            });
+        });
     }
 
     private Callback getCallback() {
@@ -153,11 +165,15 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
     }
 
     private void loadLive(String url) {
-        LiveConfig.load(Config.find(url, 1), new Callback() {
-            @Override
-            public void success() {
-                openLive();
-            }
+        // Config 读数据库移到后台线程，读完后回主线程加载直播配置
+        App.execute(() -> {
+            Config config = Config.find(url, 1);
+            App.post(() -> LiveConfig.load(config, new Callback() {
+                @Override
+                public void success() {
+                    openLive();
+                }
+            }));
         });
     }
 
@@ -168,6 +184,7 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
             navigation.getMenu().findItem(R.id.setting).setVisible(true);
             navigation.getMenu().findItem(R.id.live).setVisible(LiveConfig.hasUrl() && !Setting.isLiveTabVisible());
         }
+        syncFabLive();
     }
 
     private boolean openLive() {
@@ -202,16 +219,34 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
     public boolean onNavigationItemSelected(@NonNull MenuItem item) {
         NavigationBarView navigation = getNavigationView();
         if (navigation == null || navigation.getSelectedItemId() == item.getItemId()) return false;
-        if (item.getItemId() == R.id.setting) return mManager.change(1);
-        if (item.getItemId() == R.id.vod) return mManager.change(0);
-        if (item.getItemId() == R.id.live) {
+        return switchPage(item.getItemId());
+    }
+
+    private boolean switchPage(int id) {
+        int position = -1;
+        if (id == R.id.setting) position = 1;
+        else if (id == R.id.vod) position = 0;
+        else if (id == R.id.live) {
             if (LiveConfig.isEmpty()) {
                 Notify.showCenter(R.string.error_no_live);
                 return false;
             }
             return openLive();
         }
-        return false;
+        if (position < 0) return false;
+        // 如果当前已经是目标页面，强制刷新
+        if (mManager.isVisible(position)) {
+            BaseFragment fragment = mManager.getFragment(position);
+            if (fragment != null && fragment.getView() != null) {
+                fragment.getView().post(() -> {
+                    fragment.getView().requestLayout();
+                    fragment.onHiddenChanged(false);
+                });
+            }
+            return true;
+        }
+        mManager.change(position);
+        return true;
     }
 
     @Override
@@ -233,18 +268,61 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
 
     @Override
     protected void onBackPress() {
-        NavigationBarView navigation = getNavigationView();
-        if (navigation == null) {
-            finish();
-            return;
-        }
-        if (!navigation.getMenu().findItem(R.id.vod).isVisible()) {
-            setNavigation();
-        } else if (mManager.isVisible(1)) {
-            navigation.setSelectedItemId(R.id.vod);
+        if (mManager.isVisible(1)) {
+            mManager.change(0);
         } else if (mManager.canBack(0)) {
             finish();
         }
+    }
+
+    private boolean menuOpen;
+
+    private void bindFab() {
+        mBinding.fabMain.setOnClickListener(v -> toggleFabMenu());
+        mBinding.fabScrim.setOnClickListener(v -> closeFabMenu());
+        View.OnClickListener page = v -> {
+            closeFabMenu();
+            int id = v.getId();
+            if (id == R.id.fab_vod) switchPage(R.id.vod);
+            else if (id == R.id.fab_live) switchPage(R.id.live);
+            else if (id == R.id.fab_setting) switchPage(R.id.setting);
+        };
+        mBinding.fabVod.setOnClickListener(page);
+        mBinding.fabLive.setOnClickListener(page);
+        mBinding.fabSetting.setOnClickListener(page);
+        syncFabLive();
+    }
+
+    private void syncFabLive() {
+        if (mBinding.fabLive != null) {
+            mBinding.fabLive.setVisibility(LiveConfig.hasUrl() && !Setting.isLiveTabVisible() ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void toggleFabMenu() {
+        if (menuOpen) closeFabMenu();
+        else openFabMenu();
+    }
+
+    private void openFabMenu() {
+        menuOpen = true;
+        mBinding.fabScrim.setVisibility(View.VISIBLE);
+        mBinding.fabMenu.setVisibility(View.VISIBLE);
+        int count = mBinding.fabMenu.getChildCount();
+        for (int i = 0; i < count; i++) {
+            View child = mBinding.fabMenu.getChildAt(i);
+            child.setAlpha(0f);
+            child.setTranslationY(40f);
+            child.animate().alpha(1f).translationY(0f).setDuration(180).setStartDelay((count - 1 - i) * 40L).start();
+        }
+        mBinding.fabMain.setImageResource(R.drawable.ic_fab_close);
+    }
+
+    private void closeFabMenu() {
+        menuOpen = false;
+        mBinding.fabScrim.setVisibility(View.GONE);
+        mBinding.fabMenu.setVisibility(View.GONE);
+        mBinding.fabMain.setImageResource(R.drawable.ic_fab_menu);
     }
 
     @Override

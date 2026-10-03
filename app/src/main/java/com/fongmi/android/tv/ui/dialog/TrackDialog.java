@@ -15,6 +15,7 @@ import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Tracks;
 import androidx.viewbinding.ViewBinding;
 
+import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.Sub;
 import com.fongmi.android.tv.bean.Track;
@@ -106,7 +107,9 @@ public final class TrackDialog extends BaseDialog implements TrackAdapter.OnClic
     }
 
     private void addTrack(List<Track> items) {
-        List<Tracks.Group> groups = player.get().getCurrentTracks().getGroups();
+        com.fongmi.android.tv.player.engine.ExoPlayerEngine exoEngine = player.getExoEngine();
+        if (exoEngine == null || exoEngine.getExoPlayer() == null) return;
+        List<Tracks.Group> groups = exoEngine.getExoPlayer().getCurrentTracks().getGroups();
         for (int i = 0; i < groups.size(); i++) {
             Tracks.Group trackGroup = groups.get(i);
             if (trackGroup.getType() != type) continue;
@@ -123,7 +126,9 @@ public final class TrackDialog extends BaseDialog implements TrackAdapter.OnClic
 
     @Override
     public void onItemClick(Track item) {
-        player.setTrack(Arrays.asList(item.key(player.getKey()).save()));
+        item.key(player.getKey());
+        App.execute(item::save);
+        player.setTrack(Arrays.asList(item));
         if (item.isAdaptive()) return;
         dismiss();
     }

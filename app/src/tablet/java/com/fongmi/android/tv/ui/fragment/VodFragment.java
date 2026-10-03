@@ -170,17 +170,16 @@ public class VodFragment extends BaseFragment implements SiteCallback, FilterCal
     // 添加检查上次播放历史并显示弹窗的方法
     private void checkLastWatchDialog() {
         if (App.isAppJustLaunched()) {
-            List<History> histories = History.get();
-            if (!histories.isEmpty()) {
-                App.setAppLaunched();
+            // 历史记录读数据库移到后台线程
+            App.execute(() -> {
+                List<History> histories = History.get();
                 App.post(() -> {
-                    if (getActivity() != null) {
+                    if (!histories.isEmpty() && getActivity() != null) {
                         LastWatchToast.create(getActivity(), histories.get(0)).show();
                     }
+                    App.setAppLaunched();
                 }, 1000);
-            } else {
-                App.setAppLaunched();
-            }
+            });
         }
     }
 
@@ -477,6 +476,10 @@ public class VodFragment extends BaseFragment implements SiteCallback, FilterCal
             )
         );
         mHistoryAdapter = new HistoryCardAdapter(item -> {
+            if (!VodConfig.get().hasSite(item.getSiteKey())) {
+                Notify.show(R.string.history_site_missing);
+                return;
+            }
             VideoActivity.start(getActivity(), item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
         });
         mBinding.historyRecycler.setAdapter(mHistoryAdapter);
@@ -488,15 +491,19 @@ public class VodFragment extends BaseFragment implements SiteCallback, FilterCal
             mBinding.historySection.setVisibility(View.GONE);
             return;
         }
-        
-        List<History> histories = History.get();
-        
-        if (histories == null || histories.isEmpty()) {
-            mBinding.historySection.setVisibility(View.GONE);
-        } else {
-            mBinding.historySection.setVisibility(View.VISIBLE);
-            mHistoryAdapter.setItems(histories);
-        }
+
+        // 历史记录读数据库移到后台线程，避免主线程访问 Room
+        App.execute(() -> {
+            List<History> histories = History.get();
+            App.post(() -> {
+                if (histories == null || histories.isEmpty()) {
+                    mBinding.historySection.setVisibility(View.GONE);
+                } else {
+                    mBinding.historySection.setVisibility(View.VISIBLE);
+                    mHistoryAdapter.setItems(histories);
+                }
+            });
+        });
     }
 
     private void showProgress() {
@@ -529,7 +536,9 @@ public class VodFragment extends BaseFragment implements SiteCallback, FilterCal
     }
 
     private void setLogo() {
-        Glide.with(App.get()).load(UrlUtil.convert(VodConfig.get().getConfig().getLogo())).circleCrop().override(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL).error(R.drawable.ic_logo).listener(getListener()).into(mBinding.logo);
+        Config config = VodConfig.get().getConfig();
+        if (config == null) return;
+        Glide.with(App.get()).load(UrlUtil.convert(config.getLogo())).circleCrop().override(Target.SIZE_ORIGINAL, Target.SIZE_ORIGINAL).error(R.drawable.ic_logo).listener(getListener()).into(mBinding.logo);
     }
 
     private RequestListener<Drawable> getListener() {
@@ -623,6 +632,14 @@ public class VodFragment extends BaseFragment implements SiteCallback, FilterCal
     public void onResume() {
         super.onResume();
         loadHistory();
+    }
+
+    @Override
+    public void onHiddenChanged(boolean hidden) {
+        super.onHiddenChanged(hidden);
+        if (!hidden && mBinding.pager.getAdapter() != null) {
+            mBinding.pager.getAdapter().notifyDataSetChanged();
+        }
     }
 
     @Override

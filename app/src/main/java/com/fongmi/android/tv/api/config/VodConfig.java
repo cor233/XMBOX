@@ -1,4 +1,6 @@
 package com.fongmi.android.tv.api.config;
+import android.os.Looper;
+
 import com.github.catvod.utils.Logger;
 
 import android.text.TextUtils;
@@ -59,15 +61,18 @@ public class VodConfig {
     }
 
     public static int getCid() {
-        return get().getConfig().getId();
+        Config c = get().getConfig();
+        return c == null ? 0 : c.getId();
     }
 
     public static String getUrl() {
-        return get().getConfig().getUrl();
+        Config c = get().getConfig();
+        return c == null ? "" : c.getUrl();
     }
 
     public static String getDesc() {
-        return get().getConfig().getDesc();
+        Config c = get().getConfig();
+        return c == null ? "" : c.getDesc();
     }
 
     public static int getHomeIndex() {
@@ -124,6 +129,22 @@ public class VodConfig {
         this.home = null;
         this.parse = null;
         this.config = Config.vod();
+        this.ads = new ArrayList<>();
+        this.doh = new ArrayList<>();
+        this.rules = new ArrayList<>();
+        this.sites = new ArrayList<>();
+        this.flags = new ArrayList<>();
+        this.parses = new ArrayList<>();
+        this.loadLive = false;
+        return this;
+    }
+
+    /** 与 init() 等价，但使用调用方已读好的 Config，避免在调用线程访问数据库 */
+    public VodConfig init(Config config) {
+        this.wall = null;
+        this.home = null;
+        this.parse = null;
+        this.config = config;
         this.ads = new ArrayList<>();
         this.doh = new ArrayList<>();
         this.rules = new ArrayList<>();
@@ -377,7 +398,11 @@ public class VodConfig {
     }
 
     public Config getConfig() {
-        return config == null ? Config.vod() : config;
+        if (config != null) return config;
+        // 主线程且配置尚未加载时不回退到 Room 读库（避免主线程磁盘 I/O，StrictMode 会告警），
+        // 后台线程（如 initConfig / SettingFragment）仍保留懒加载。
+        if (Looper.getMainLooper().getThread() == Thread.currentThread()) return null;
+        return Config.vod();
     }
 
     public Parse getParse() {
@@ -402,10 +427,19 @@ public class VodConfig {
         return index == -1 ? new Site() : getSites().get(index);
     }
 
+    public boolean hasSite(String key) {
+        if (TextUtils.isEmpty(key)) return false;
+        return !getSite(key).getKey().isEmpty();
+    }
+
     public void setParse(Parse parse) {
         this.parse = parse;
         this.parse.setActivated(true);
-        config.parse(parse.getName()).save();
+        try {
+            if (config != null) App.execute(() -> config.parse(parse.getName()).save());
+        } catch (Exception e) {
+            Logger.e("Error", e);
+        }
         for (Parse item : getParses()) item.setActivated(parse);
     }
 

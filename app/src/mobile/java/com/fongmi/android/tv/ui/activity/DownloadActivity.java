@@ -10,6 +10,7 @@ import android.view.View;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.viewbinding.ViewBinding;
 
+import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.Download;
 import com.fongmi.android.tv.databinding.ActivityDownloadBinding;
@@ -67,9 +68,13 @@ public class DownloadActivity extends BaseActivity implements DownloadAdapter.On
     }
 
     private void getDownloads() {
-        List<Download> downloads = Download.getAll();
-        mAdapter.addAll(downloads);
-        updateEmptyState();
+        App.execute(() -> {
+            List<Download> downloads = Download.getAll();
+            App.post(() -> {
+                mAdapter.addAll(downloads);
+                updateEmptyState();
+            });
+        });
     }
 
     private void updateEmptyState() {
@@ -86,10 +91,15 @@ public class DownloadActivity extends BaseActivity implements DownloadAdapter.On
                 .setMessage(R.string.dialog_delete_download)
                 .setNegativeButton(R.string.dialog_negative, null)
                 .setPositiveButton(R.string.dialog_positive, (dialog, which) -> {
-                    // 删除所有下载
-                    Download.clear();
-                    mAdapter.addAll(Download.getAll());
-                    updateEmptyState();
+                    // 删除所有下载（后台线程执行DB操作）
+                    App.execute(() -> {
+                        Download.clear();
+                        List<Download> downloads = Download.getAll();
+                        App.post(() -> {
+                            mAdapter.addAll(downloads);
+                            updateEmptyState();
+                        });
+                    });
                 })
                 .show();
     }
@@ -114,7 +124,7 @@ public class DownloadActivity extends BaseActivity implements DownloadAdapter.On
                     startService(intent);
 
                     // 删除记录
-                    item.delete();
+                    App.execute(item::delete);
                     mAdapter.remove(item);
                     updateEmptyState();
                 })
@@ -126,11 +136,15 @@ public class DownloadActivity extends BaseActivity implements DownloadAdapter.On
         mRefreshRunnable = new Runnable() {
             @Override
             public void run() {
-                // 刷新下载列表
-                List<Download> downloads = Download.getAll();
-                for (Download download : downloads) {
-                    mAdapter.update(download);
-                }
+                // 后台线程刷新下载列表
+                App.execute(() -> {
+                    List<Download> downloads = Download.getAll();
+                    App.post(() -> {
+                        for (Download download : downloads) {
+                            mAdapter.update(download);
+                        }
+                    });
+                });
                 mHandler.postDelayed(this, 1000);
             }
         };

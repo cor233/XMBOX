@@ -8,6 +8,7 @@ import android.view.View;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.viewbinding.ViewBinding;
 
+import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.Product;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.api.config.VodConfig;
@@ -25,6 +26,8 @@ import com.airbnb.lottie.LottieAnimationView;
 
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
+
+import java.util.List;
 
 public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickListener {
 
@@ -62,9 +65,15 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
     }
 
     private void getKeep() {
-        mAdapter.addAll(Keep.getVod());
-        mBinding.delete.setVisibility(mAdapter.getItemCount() > 0 ? View.VISIBLE : View.GONE);
-        updateEmptyState();
+        // 收藏读数据库移到后台线程，避免主线程访问 Room
+        App.execute(() -> {
+            List<Keep> items = Keep.getVod();
+            App.post(() -> {
+                mAdapter.addAll(items);
+                mBinding.delete.setVisibility(mAdapter.getItemCount() > 0 ? View.VISIBLE : View.GONE);
+                updateEmptyState();
+            });
+        });
     }
 
     private void updateEmptyState() {
@@ -86,7 +95,11 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
     }
 
     private void onSync(View view) {
-        SyncDialog.create().keep().show(this);
+        // 同步数据（收藏/配置）读取移到后台线程，读完后回主线程弹窗
+        App.execute(() -> {
+            SyncDialog dialog = SyncDialog.create().keep();
+            App.post(() -> dialog.show(this));
+        });
     }
 
     private void onDelete(View view) {
@@ -106,7 +119,7 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
         VodConfig.load(config, new Callback() {
             @Override
             public void success() {
-                VideoActivity.start(getActivity(), item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
+                play(item);
                 RefreshEvent.config();
                 RefreshEvent.video();
             }
@@ -118,6 +131,14 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
         });
     }
 
+    private void play(Keep item) {
+        if (!VodConfig.get().hasSite(item.getSiteKey())) {
+            Notify.show(R.string.history_site_missing);
+            return;
+        }
+        VideoActivity.start(this, item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
+    }
+
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void onRefreshEvent(RefreshEvent event) {
         if (event.getType().equals(RefreshEvent.Type.KEEP)) getKeep();
@@ -125,15 +146,21 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
 
     @Override
     public void onItemClick(Keep item) {
-        Config config = Config.find(item.getCid());
-        if (config == null) CollectActivity.start(this, item.getVodName());
-        else if (item.getCid() != VodConfig.getCid()) loadConfig(config, item);
-        else VideoActivity.start(this, item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
+        // Config 读数据库移到后台线程，查完回主线程再跳转
+        App.execute(() -> {
+            Config config = Config.find(item.getCid());
+            App.post(() -> {
+                if (config == null) CollectActivity.start(this, item.getVodName());
+                else if (item.getCid() != VodConfig.getCid()) loadConfig(config, item);
+                else play(item);
+            });
+        });
     }
 
     @Override
     public void onItemDelete(Keep item) {
-        mAdapter.remove(item.delete());
+        App.execute(item::delete);
+        mAdapter.remove(item);
         if (mAdapter.getItemCount() > 0) return;
         mBinding.delete.setVisibility(View.GONE);
         mAdapter.setDelete(false);

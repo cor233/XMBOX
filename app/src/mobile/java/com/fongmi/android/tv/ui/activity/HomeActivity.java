@@ -80,7 +80,6 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
         initFragment(savedInstanceState);
         Server.get().start();
         initConfig();
-        setNavigation();
     }
 
     @Override
@@ -91,7 +90,8 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
 
     private void checkAction(Intent intent) {
         if (Intent.ACTION_SEND.equals(intent.getAction())) {
-            VideoActivity.push(this, intent.getStringExtra(Intent.EXTRA_TEXT));
+            String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (text != null && !text.isEmpty()) VideoActivity.push(this, text);
         } else if (Intent.ACTION_VIEW.equals(intent.getAction()) && intent.getData() != null) {
             if ("text/plain".equals(intent.getType()) || UrlUtil.path(intent.getData()).endsWith(".m3u")) {
                 loadLive("file:/" + FileChooser.getPathFromUri(this, intent.getData()));
@@ -114,9 +114,19 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
     }
 
     private void initConfig() {
-        WallConfig.get().init();
-        LiveConfig.get().init().load();
-        VodConfig.get().init().load(getCallback());
+        // 把配置的 Room 读取移到后台线程，避免主线程访问数据库
+        App.execute(() -> {
+            Config wall = Config.wall();
+            Config live = Config.live();
+            Config vod = Config.vod();
+            App.post(() -> {
+                WallConfig.get().init(wall);
+                LiveConfig.get().init(live).load();
+                VodConfig.get().init(vod).load(getCallback());
+                // 配置加载完成后再刷新导航（LiveConfig.hasUrl 此时已用内存中的 config，不触发主线程读库）
+                setNavigation();
+            });
+        });
     }
 
     private Callback getCallback() {
@@ -143,11 +153,15 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
     }
 
     private void loadLive(String url) {
-        LiveConfig.load(Config.find(url, 1), new Callback() {
-            @Override
-            public void success() {
-                openLive();
-            }
+        // Config 读数据库移到后台线程，读完后回主线程加载直播配置
+        App.execute(() -> {
+            Config config = Config.find(url, 1);
+            App.post(() -> LiveConfig.load(config, new Callback() {
+                @Override
+                public void success() {
+                    openLive();
+                }
+            }));
         });
     }
 

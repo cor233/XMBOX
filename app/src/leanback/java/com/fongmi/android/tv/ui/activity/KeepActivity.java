@@ -6,7 +6,9 @@ import android.content.Intent;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.viewbinding.ViewBinding;
 
+import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.Product;
+import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.api.config.VodConfig;
 import com.fongmi.android.tv.bean.Config;
 import com.fongmi.android.tv.bean.Keep;
@@ -20,6 +22,8 @@ import com.fongmi.android.tv.utils.Notify;
 
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
+
+import java.util.List;
 
 public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickListener {
 
@@ -50,14 +54,18 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
     }
 
     private void getKeep() {
-        mAdapter.addAll(Keep.getVod());
+        // 收藏读数据库移到后台线程，避免主线程访问 Room
+        App.execute(() -> {
+            List<Keep> items = Keep.getVod();
+            App.post(() -> mAdapter.addAll(items));
+        });
     }
 
     private void loadConfig(Config config, Keep item) {
         VodConfig.load(config, new Callback() {
             @Override
             public void success() {
-                VideoActivity.start(getActivity(), item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
+                play(item);
                 RefreshEvent.history();
                 RefreshEvent.config();
                 RefreshEvent.video();
@@ -70,6 +78,14 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
         });
     }
 
+    private void play(Keep item) {
+        if (!VodConfig.get().hasSite(item.getSiteKey())) {
+            Notify.show(R.string.history_site_missing);
+            return;
+        }
+        VideoActivity.start(this, item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
+    }
+
     @Subscribe(threadMode = ThreadMode.MAIN)
     public void onRefreshEvent(RefreshEvent event) {
         if (event.getType() == RefreshEvent.Type.KEEP) getKeep();
@@ -77,15 +93,21 @@ public class KeepActivity extends BaseActivity implements KeepAdapter.OnClickLis
 
     @Override
     public void onItemClick(Keep item) {
-        Config config = Config.find(item.getCid());
-        if (config == null) CollectActivity.start(this, item.getVodName());
-        else if (item.getCid() != VodConfig.getCid()) loadConfig(config, item);
-        else VideoActivity.start(this, item.getSiteKey(), item.getVodId(), item.getVodName(), item.getVodPic());
+        // Config 读数据库移到后台线程，查完回主线程再跳转
+        App.execute(() -> {
+            Config config = Config.find(item.getCid());
+            App.post(() -> {
+                if (config == null) CollectActivity.start(this, item.getVodName());
+                else if (item.getCid() != VodConfig.getCid()) loadConfig(config, item);
+                else play(item);
+            });
+        });
     }
 
     @Override
     public void onItemDelete(Keep item) {
-        mAdapter.delete(item.delete());
+        App.execute(item::delete);
+        mAdapter.delete(item);
         if (mAdapter.getItemCount() == 0) mAdapter.setDelete(false);
     }
 

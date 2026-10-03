@@ -18,6 +18,8 @@ import com.fongmi.android.tv.ui.custom.SpaceItemDecoration;
 import com.fongmi.android.tv.utils.Notify;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import java.util.List;
+
 public class HistoryDialog implements ConfigAdapter.OnClickListener {
 
     private final DialogHistoryBinding binding;
@@ -49,14 +51,18 @@ public class HistoryDialog implements ConfigAdapter.OnClickListener {
 
     private void setRecyclerView() {
         binding.recycler.setHasFixedSize(true);
-        binding.recycler.setAdapter(adapter.addAll(type));
+        binding.recycler.setAdapter(adapter);
         binding.recycler.addItemDecoration(new SpaceItemDecoration(1, 8));
     }
 
     private void setDialog() {
-        if (adapter.getItemCount() == 0) return;
-        dialog.getWindow().setDimAmount(0);
-        dialog.show();
+        App.execute(() -> {
+            List<Config> items = adapter.load(type);
+            App.post(() -> {
+                adapter.setItems(items);
+                dialog.show();
+            });
+        });
     }
 
     @Override

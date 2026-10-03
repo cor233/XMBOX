@@ -29,6 +29,7 @@ import com.fongmi.android.tv.Setting;
 import com.fongmi.android.tv.api.config.LiveConfig;
 import com.fongmi.android.tv.bean.CastVideo;
 import com.fongmi.android.tv.bean.Channel;
+import com.fongmi.android.tv.bean.Config;
 import com.fongmi.android.tv.bean.Epg;
 import com.fongmi.android.tv.bean.EpgData;
 import com.fongmi.android.tv.bean.Group;
@@ -266,7 +267,11 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
 
     private void checkLive() {
         if (isEmpty()) {
-            LiveConfig.get().init().load(getCallback());
+            // Config 读数据库移到后台线程，读完后回主线程初始化并加载
+            App.execute(() -> {
+                Config config = Config.live();
+                App.post(() -> LiveConfig.get().init(config).load(getCallback()));
+            });
         } else {
             getLive();
         }
@@ -644,13 +649,13 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
         Keep keep = new Keep();
         keep.setKey(item.getName());
         keep.setType(1);
-        keep.save();
+        App.execute(keep::save);
     }
 
     private void delKeep(Channel item) {
         if (mGroup.isKeep()) mChannelAdapter.remove(item);
         getKeep().getChannel().remove(item);
-        Keep.delete(item.getName());
+        App.execute(() -> Keep.delete(item.getName()));
     }
 
     private void setInfo() {
@@ -837,6 +842,7 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
     }
 
     private void setMetadata() {
+        if (mChannel == null) return;
         String title = mBinding.widget.name.getText().toString();
         String artist = mBinding.widget.play.getText().toString();
         mPlayers.setMetadata(title, artist, mChannel.getLogo(), mBinding.exo.getDefaultArtwork());
@@ -850,7 +856,7 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
     }
 
     private void onError(ErrorEvent event) {
-        Track.delete(mPlayers.getUrl());
+        App.execute(() -> Track.delete(mPlayers.getUrl()));
         showError(event.getMsg());
         mPlayers.resetTrack();
         mPlayers.reset();
@@ -860,10 +866,12 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
 
     private void startFlow() {
         if (!Setting.isChange()) return;
+        if (mChannel == null) return;
         if (!mChannel.isLast()) nextLine(true);
     }
 
     private boolean prevGroup() {
+        if (mGroupAdapter.getItemCount() == 0) return false;
         int position = mGroupAdapter.getPosition() - 1;
         if (position < 0) position = mGroupAdapter.getItemCount() - 1;
         if (mGroup.equals(mGroupAdapter.get(position))) return false;
@@ -876,6 +884,7 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
     }
 
     private boolean nextGroup() {
+        if (mGroupAdapter.getItemCount() == 0) return false;
         int position = mGroupAdapter.getPosition() + 1;
         if (position > mGroupAdapter.getItemCount() - 1) position = 0;
         if (mGroup.equals(mGroupAdapter.get(position))) return false;
@@ -906,6 +915,7 @@ public class LiveActivity extends BaseActivity implements CustomKeyDownLive.List
     }
 
     private void checkNext() {
+        if (mChannel == null) return;
         int current = mChannel.getData().getInRange();
         int position = mChannel.getData().getSelected() + 1;
         boolean hasNext = position <= current && position > 0;

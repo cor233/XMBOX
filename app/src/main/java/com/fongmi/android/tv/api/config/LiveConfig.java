@@ -1,4 +1,6 @@
 package com.fongmi.android.tv.api.config;
+import android.os.Looper;
+
 import com.github.catvod.utils.Logger;
 
 import android.net.Uri;
@@ -57,11 +59,13 @@ public class LiveConfig {
     }
 
     public static String getUrl() {
-        return get().getConfig().getUrl();
+        Config c = get().getConfig();
+        return c == null ? "" : c.getUrl();
     }
 
     public static String getDesc() {
-        return get().getConfig().getDesc();
+        Config c = get().getConfig();
+        return c == null ? "" : c.getDesc();
     }
 
     public static String getResp() {
@@ -94,6 +98,15 @@ public class LiveConfig {
         this.rules = new ArrayList<>();
         this.lives = new ArrayList<>();
         return config(Config.live());
+    }
+
+    /** 与 init() 等价，但使用调用方已读好的 Config，避免在调用线程访问数据库 */
+    public LiveConfig init(Config config) {
+        this.home = null;
+        this.ads = new ArrayList<>();
+        this.rules = new ArrayList<>();
+        this.lives = new ArrayList<>();
+        return config(config);
     }
 
     public LiveConfig config(Config config) {
@@ -191,6 +204,7 @@ public class LiveConfig {
         for (JsonElement element : Json.safeListElement(object, "lives")) {
             Live live = Live.objectFrom(element);
             if (lives.contains(live)) continue;
+            if (TextUtils.isEmpty(live.getName())) continue;
             live.setApi(UrlUtil.convert(live.getApi()));
             live.setExt(UrlUtil.convert(live.getExt()));
             live.setJar(parseJar(live, spider));
@@ -226,7 +240,13 @@ public class LiveConfig {
     }
 
     public void setKeep(Channel channel) {
-        if (home != null && !channel.getGroup().isHidden()) home.keep(channel).save();
+        if (home != null && !channel.getGroup().isHidden()) {
+            try {
+                App.execute(() -> home.keep(channel).save());
+            } catch (Exception e) {
+                Logger.e("Error", e);
+            }
+        }
     }
 
     public void setKeep(List<Group> items) {
@@ -265,6 +285,7 @@ public class LiveConfig {
     }
 
     public boolean needSync(String url) {
+        if (config == null) return false;
         return sync || TextUtils.isEmpty(config.getUrl()) || url.equals(config.getUrl());
     }
 
@@ -301,7 +322,9 @@ public class LiveConfig {
     }
 
     public Config getConfig() {
-        return config == null ? Config.live() : config;
+        if (config != null) return config;
+        if (Looper.getMainLooper().getThread() == Thread.currentThread()) return null;
+        return Config.live();
     }
 
     public Live getHome() {
@@ -320,9 +343,13 @@ public class LiveConfig {
     private void setHome(Live home, boolean check) {
         this.home = home;
         this.home.setActivated(true);
-        config.home(home.getName()).update();
+        try {
+            if (config != null) App.execute(() -> config.home(home.getName()).update());
+        } catch (Exception e) {
+            Logger.e("Error", e);
+        }
         for (Live item : getLives()) item.setActivated(home);
         if (App.activity() != null && App.activity() instanceof LiveActivity) return;
-        if (check) if (home.isBoot() || Setting.isBootLive()) App.post(this::bootLive);
+        if (check && !home.isEmpty()) if (home.isBoot() || Setting.isBootLive()) App.post(this::bootLive);
     }
 }
